@@ -1,6 +1,9 @@
 # EDM: Efficient Deep Feature Matching
 
-## [Paper](https://arxiv.org/pdf/2503.05122) 
+[![arXiv](https://img.shields.io/badge/arXiv-2503.05122-b31b1b.svg?style=flat)](https://arxiv.org/abs/2503.05122)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1dNtUw1DAdVUcbvbfi6IXSBlLh_WGeqlG?usp=drive_link)
+[![Open in Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/xi-li/EDM)
+
 
 https://github.com/user-attachments/assets/f7e0e026-6b57-4577-a26c-185f82be725e
 
