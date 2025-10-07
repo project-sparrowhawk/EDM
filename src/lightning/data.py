@@ -26,6 +26,7 @@ from src.utils import comm
 from src.datasets.megadepth import MegaDepthDataset
 from src.datasets.scannet import ScanNetDataset
 from src.datasets.sampler import RandomConcatSampler
+from src.datasets.synthetic_homography import SyntheticHomographyDataset
 
 
 class MultiSceneDataModule(pl.LightningDataModule):
@@ -229,6 +230,15 @@ class MultiSceneDataModule(pl.LightningDataModule):
         pose_dir=None,
     ):
         """Setup train / val / test set"""
+        # TODO: check if this needs to look so ugly
+        data_source = self.trainval_data_source if mode in ['train', 'val'] else self.test_data_source
+        if str(data_source).lower() == "synthetichomography":
+            # For the synthetic dataset, we bypass the scene-splitting logic
+            # and directly build the dataset.
+            return self._build_concat_dataset(
+                data_root, None, None, None, mode=mode
+            )
+
         with open(scene_list_path, "r") as f:
             npz_names = [name.split()[0] for name in f.readlines()]
 
@@ -273,8 +283,21 @@ class MultiSceneDataModule(pl.LightningDataModule):
             if mode in ["train", "val"]
             else self.test_data_source
         )
+
+        if str(data_source).lower() == "synthetichomography":
+            # For synthetic data, we don't concatenate multiple scene datasets.
+            # We create one dataset from a list of images.
+            # `npz_names` from `_setup_dataset` is the list of image files,
+            # and `npz_dir` is the data root. `scene_list_path` in config points to the txt file.
+            return SyntheticHomographyDataset(
+                root_dir=data_root,
+                list_path=self.train_list_path if mode == 'train' else self.val_list_path,
+                img_resize=self.scan_img_resize, # Reuse ScanNet's resize settings
+            )
+
         if str(data_source).lower() == "megadepth":
             npz_names = [f"{n}.npz" for n in npz_names]
+
         for npz_name in tqdm(
             npz_names,
             desc=f"[rank:{self.rank}] loading {mode} datasets",
@@ -398,6 +421,12 @@ class MultiSceneDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         """Build training dataloader for ScanNet / MegaDepth."""
+        # TODO check if we can fit the existing logic with out new dataset
+        if str(self.trainval_data_source).lower() == "synthetichomography":
+            # The synthetic dataset is not a ConcatDataset, so we use a standard sampler.
+            sampler = DistributedSampler(self.train_dataset, shuffle=True)
+            return DataLoader(self.train_dataset, sampler=sampler, **self.train_loader_params)
+
         assert self.data_sampler in ["scene_balance"]
         logger.info(
             f"[rank:{self.rank}/{self.world_size}]: Train Sampler and DataLoader re-init (should not re-init between epochs!)."

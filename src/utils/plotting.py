@@ -10,6 +10,8 @@ def _compute_conf_thresh(data):
         thr = 5e-4
     elif dataset_name == "megadepth":
         thr = 1e-4
+    elif dataset_name == "synthetichomography":
+        thr = 1e-2 # TODO: check what does this value should be and what it means
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     return thr
