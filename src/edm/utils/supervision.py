@@ -4,6 +4,7 @@ from loguru import logger
 import torch
 from einops import repeat
 from kornia.utils import create_meshgrid
+from kornia.geometry.linalg import transform_points
 
 from .geometry import warp_kpts
 
@@ -255,3 +256,73 @@ def spvs_fine(data, pad=0, window_size=8.0):
 
 def compute_supervision_fine(data, pad=0, window_size=8.0):
     spvs_fine(data, pad, window_size)
+
+
+# TODO: check if fine level loss is fine
+# TODO: check if this funcition makes sense
+@torch.no_grad()
+def spvs_coarse_homography(data, config):
+    """
+    Generate coarse-level supervision for a pair of images related by a homography.
+    """
+    device = data['image0'].device
+    N, _, H0, W0 = data['image0'].shape
+    scale = config['EDM']['LOCAL_RESOLUTION']
+    h0, w0 = H0 // scale, W0 // scale
+    
+    # 1. Create a grid of points in the coarse resolution
+    grid_pt0_c = create_meshgrid(h0, w0, False, device).reshape(1, h0 * w0, 2).repeat(N, 1, 1) # [N, hw, 2]
+
+    # 2. Scale coarse points to original image resolution for homography transformation
+    # The homography is defined on the full resolution images (W, H)
+    grid_pt0_i = grid_pt0_c * scale
+
+    # 3. Warp points using the homography
+    # kornia.transform_points expects homography of shape (N, 3, 3)
+    homography = data['homography'].to(device)
+    w_pt0_i = transform_points(homography, grid_pt0_i) # [N, hw, 2]
+
+    # 4. Scale warped points back to coarse resolution
+    w_pt0_c = w_pt0_i / scale
+    
+    # 5. Find nearest grid point for each warped point to establish correspondence
+    w_pt0_c_round = w_pt0_c.round().long()
+    
+    # Create masks for points that are warped outside the image boundaries
+    # These are invalid correspondences.
+    in_bound_mask = (w_pt0_c_round[..., 0] >= 0) & (w_pt0_c_round[..., 0] < w0) & \
+                    (w_pt0_c_round[..., 1] >= 0) & (w_pt0_c_round[..., 1] < h0)
+
+    # Get the 1D index for the target points
+    j_ids_gt = w_pt0_c_round[..., 1] * w0 + w_pt0_c_round[..., 0] # [N, hw0]
+
+    # 6. Construct the ground-truth confidence matrix
+    conf_matrix_gt = torch.zeros(N, h0 * w0, h0 * w0, device=device)
+    
+    # Get batch and source point indices for valid correspondences
+    b_ids, i_ids = torch.where(in_bound_mask)
+    # Get the corresponding target point indices
+    j_ids = j_ids_gt[b_ids, i_ids]
+
+    conf_matrix_gt[b_ids, i_ids, j_ids] = 1
+    data.update({'conf_matrix_gt': conf_matrix_gt})
+
+    # For fine-level supervision (not fully implemented here, but necessary keys are provided)
+    if len(b_ids) == 0:
+        b_ids = torch.tensor([0], device=device)
+        i_ids = torch.tensor([0], device=device)
+        j_ids = torch.tensor([0], device=device)
+
+    data.update({'spv_b_ids': b_ids, 'spv_i_ids': i_ids, 'spv_j_ids': j_ids})
+    
+    # Dummy values for fine supervision keys used by the original datasets
+    grid_pt1_i = create_meshgrid(H0, W0, False, device).reshape(1, H0 * W0, 2).repeat(N, 1, 1)
+    data.update({
+        'spv_w_pt0_i': w_pt0_i,
+        'spv_pt1_i': grid_pt1_i,
+        # These two are not accurate for homography but are needed to prevent crashes.
+        # Fine-level loss might be incorrect without further changes.
+        'spv_w_pt1_i': grid_pt0_i,
+        'spv_pt0_i': grid_pt0_i,
+    })
+
